@@ -82,10 +82,9 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
     event FracoesResgatadas(uint256 indexed duplicataId, address indexed investidor, uint256 valor);
     event SaldoResgatado(address indexed cedente, uint256 valor);
 
-    
     constructor(string memory uri_, address _tokenLiquidador, address _kycSigner) ERC1155(uri_) {
         if (_tokenLiquidador == address(0) || _kycSigner == address(0)) revert EnderecoInvalido();
-        
+
         // Registra os endereços da Stablecoin ERC-20 (tokenLiquidador) e da carteira do back-end/Servidor (kycSigner)
         TOKEN_LIQUIDADOR = IERC20(_tokenLiquidador);
         kycSigner = _kycSigner;
@@ -177,7 +176,7 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
 
         // Effects (Ajuste de estado interno)
         dup.fracoesDisponiveis -= _quantidade;
-        
+
         emit FracoesAdquiridas(_duplicataId, msg.sender, _quantidade);
 
         // Encerramento automático da captação se esgotar o estoque
@@ -197,7 +196,7 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
     /**
      * @notice Liquida a duplicata via Oráculo após quitação pelo Sacado (RF05)
      */
-    function liquidarTitulo(uint256 _duplicataId) external onlyRole(ORACULO_ROLE) whenNotPaused {
+    function liquidarTitulo(uint256 _duplicataId) external nonReentrant onlyRole(ORACULO_ROLE) whenNotPaused {
         Duplicata storage dup = duplicatas[_duplicataId];
 
         if (dup.statusDuplicata != StatusDuplicata.Captado) revert TituloNaoCaptado();
