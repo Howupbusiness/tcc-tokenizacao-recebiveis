@@ -81,17 +81,28 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
     event TituloLiquidado(uint256 indexed duplicataId);
     event FracoesResgatadas(uint256 indexed duplicataId, address indexed investidor, uint256 valor);
     event SaldoResgatado(address indexed cedente, uint256 valor);
+    event KycSignerAtualizado(address indexed antigoSigner, address indexed novoSigner);
 
-    constructor(string memory uri_, address _tokenLiquidador, address _kycSigner) ERC1155(uri_) {
-        if (_tokenLiquidador == address(0) || _kycSigner == address(0)) revert EnderecoInvalido();
+    constructor(string memory uri_, address tokenLiquidador_, address kycSigner_) ERC1155(uri_) {
+        if (tokenLiquidador_ == address(0) || kycSigner_ == address(0)) revert EnderecoInvalido();
 
-        // Registra os endereços da Stablecoin ERC-20 (tokenLiquidador) e da carteira do back-end/Servidor (kycSigner)
-        TOKEN_LIQUIDADOR = IERC20(_tokenLiquidador);
-        kycSigner = _kycSigner;
+        // Registra os endereços da Stablecoin ERC-20 (TOKEN_LIQUIDADOR) e da carteira do back-end/Servidor (kycSigner)
+        TOKEN_LIQUIDADOR = IERC20(tokenLiquidador_);
+        kycSigner = kycSigner_;
 
         // Registra o endereço do Administrador/Deployer
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
+    }
+
+    /**
+    * @notice Permite ao Admin alterar a carteira do Back-end que assina os vouchers de KYC
+    * @param novoKycSigner_ O endereço da nova chave pública do servidor
+    */
+    function atualizarKycSigner(address novoKycSigner_) external onlyRole(ADMIN_ROLE) {
+        if (novoKycSigner_ == address(0)) revert EnderecoInvalido();
+        emit KycSignerAtualizado(kycSigner, novoKycSigner_);
+        kycSigner = novoKycSigner_;
     }
 
     /**
@@ -109,85 +120,85 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
      * @notice Registra uma nova duplicata-mãe no protocolo (RF01)
      */
     function cadastrarDuplicata(
-        bytes32 _documentoId,
-        address _cedente,
-        uint256 _valorNominalTotal,
-        uint256 _precoVendaFracao,
-        uint256 _totalFracoes,
-        uint64 _dataVencimento,
-        bytes32 _hashGravame
+        bytes32 documentoId_,
+        address cedente_,
+        uint256 valorNominalTotal_,
+        uint256 precoVendaFracao_,
+        uint256 totalFracoes_,
+        uint64 dataVencimento_,
+        bytes32 hashGravame_
     ) external onlyRole(ADMIN_ROLE) returns (uint256 duplicataId) {
-        if (_cedente == address(0)) revert CedenteInvalido();
-        if (_valorNominalTotal == 0) revert ValorNominalZerado();
-        if (_totalFracoes == 0) revert FracoesZeradas();
-        if (_precoVendaFracao == 0) revert PrecoFracaoInvalido();
-        if (_dataVencimento <= block.timestamp) revert VencimentoInvalido();
+        if (cedente_ == address(0)) revert CedenteInvalido();
+        if (valorNominalTotal_ == 0) revert ValorNominalZerado();
+        if (totalFracoes_ == 0) revert FracoesZeradas();
+        if (precoVendaFracao_ == 0) revert PrecoFracaoInvalido();
+        if (dataVencimento_ <= block.timestamp) revert VencimentoInvalido();
 
         duplicataId = proximoDuplicataId++;
 
         duplicatas[duplicataId] = Duplicata({
-            documentoId: _documentoId,
-            cedente: _cedente,
-            valorNominalTotal: _valorNominalTotal,
-            precoVendaFracao: _precoVendaFracao,
-            totalFracoes: _totalFracoes,
-            fracoesDisponiveis: _totalFracoes,
-            dataVencimento: _dataVencimento,
+            documentoId: documentoId_,
+            cedente: cedente_,
+            valorNominalTotal: valorNominalTotal_,
+            precoVendaFracao: precoVendaFracao_,
+            totalFracoes: totalFracoes_,
+            fracoesDisponiveis: totalFracoes_,
+            dataVencimento: dataVencimento_,
             statusDuplicata: StatusDuplicata.Disponivel,
-            hashGravame: _hashGravame
+            hashGravame: hashGravame_
         });
 
-        emit DuplicataCadastrada(duplicataId, _documentoId, _cedente);
+        emit DuplicataCadastrada(duplicataId, documentoId_, cedente_);
     }
 
     /**
      * @notice Permite a aquisição de frações de um título disponível (RF02, RF03, RF04)
      */
     function comprarFracoes(
-        uint256 _duplicataId,
-        uint256 _quantidade,
-        uint256 _validade, // Timestamp limite de validade da autorização
-        bytes calldata _assinatura // Assinatura digital gerada pelo Back-end
+        uint256 duplicataId_,
+        uint256 quantidade_,
+        uint256 validade_, // Timestamp limite de validade da autorização
+        bytes calldata assinatura_ // Assinatura digital gerada pelo Back-end
     )
         external
         nonReentrant
         whenNotPaused
     {
         // Validação de expiração da permissão
-        if (block.timestamp > _validade) revert AutorizacaoExpirada();
+        if (block.timestamp > validade_) revert AutorizacaoExpirada();
 
         // Reconstrução do hash da mensagem assinada off-chain
         bytes32 mensagemHash =
-            keccak256(abi.encodePacked(msg.sender, _duplicataId, _quantidade, _validade, block.chainid, address(this)));
+            keccak256(abi.encodePacked(msg.sender, duplicataId_, quantidade_, validade_, block.chainid, address(this)));
 
         // Aplicação do prefixo padrão da Ethereum ("\\x19Ethereum Signed Message:\\n32")
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(mensagemHash);
 
         // Validação criptográfica: confirma se a assinatura pertence ao kycSigner autorizado
-        if (ECDSA.recover(ethSignedMessageHash, _assinatura) != kycSigner) revert KYCInvalido();
+        if (ECDSA.recover(ethSignedMessageHash, assinatura_) != kycSigner) revert KYCInvalido();
 
-        Duplicata storage dup = duplicatas[_duplicataId];
+        Duplicata storage dup = duplicatas[duplicataId_];
 
         if (dup.statusDuplicata != StatusDuplicata.Disponivel) revert CaptacaoNaoDisponivel();
         if (block.timestamp > dup.dataVencimento) revert PrazoExpirado();
-        if (_quantidade == 0 || _quantidade > dup.fracoesDisponiveis) revert QuantidadeIndisponivel();
+        if (quantidade_ == 0 || quantidade_ > dup.fracoesDisponiveis) revert QuantidadeIndisponivel();
 
-        uint256 custoTotal = _quantidade * dup.precoVendaFracao;
+        uint256 custoTotal = quantidade_ * dup.precoVendaFracao;
 
         // Effects (Ajuste de estado interno)
-        dup.fracoesDisponiveis -= _quantidade;
+        dup.fracoesDisponiveis -= quantidade_;
 
-        emit FracoesAdquiridas(_duplicataId, msg.sender, _quantidade);
+        emit FracoesAdquiridas(duplicataId_, msg.sender, quantidade_);
 
         // Encerramento automático da captação se esgotar o estoque
         if (dup.fracoesDisponiveis == 0) {
             dup.statusDuplicata = StatusDuplicata.Captado;
             saldosCedentes[dup.cedente] += (dup.totalFracoes * dup.precoVendaFracao);
-            emit CaptacaoEncerrada(_duplicataId, dup.valorNominalTotal);
+            emit CaptacaoEncerrada(duplicataId_, dup.valorNominalTotal);
         }
 
         // Cunhagem do token ERC-1155 correspondente
-        _mint(msg.sender, _duplicataId, _quantidade, "");
+        _mint(msg.sender, duplicataId_, quantidade_, "");
 
         // Transferência segura de Stablecoin ERC-20 do Investidor para o Contrato
         TOKEN_LIQUIDADOR.safeTransferFrom(msg.sender, address(this), custoTotal);
@@ -196,14 +207,14 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
     /**
      * @notice Liquida a duplicata via Oráculo após quitação pelo Sacado (RF05)
      */
-    function liquidarTitulo(uint256 _duplicataId) external nonReentrant onlyRole(ORACULO_ROLE) whenNotPaused {
-        Duplicata storage dup = duplicatas[_duplicataId];
+    function liquidarTitulo(uint256 duplicataId_) external nonReentrant onlyRole(ORACULO_ROLE) whenNotPaused {
+        Duplicata storage dup = duplicatas[duplicataId_];
 
         if (dup.statusDuplicata != StatusDuplicata.Captado) revert TituloNaoCaptado();
 
         dup.statusDuplicata = StatusDuplicata.Liquidado;
 
-        emit TituloLiquidado(_duplicataId);
+        emit TituloLiquidado(duplicataId_);
 
         // Transferência segura do valor nominal em Stablecoins do Oráculo para o Contrato
         TOKEN_LIQUIDADOR.safeTransferFrom(msg.sender, address(this), dup.valorNominalTotal);
@@ -212,20 +223,20 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
     /**
      * @notice Permite o saque das frações pelo investidor aplicando CEI e Mutex (RF06, RF07; RNF01, RNF02)
      */
-    function resgatarFracoesInvestidor(uint256 _duplicataId) external nonReentrant whenNotPaused {
-        Duplicata storage dup = duplicatas[_duplicataId];
+    function resgatarFracoesInvestidor(uint256 duplicataId_) external nonReentrant whenNotPaused {
+        Duplicata storage dup = duplicatas[duplicataId_];
 
         // Checks
         if (dup.statusDuplicata != StatusDuplicata.Liquidado) revert TituloNaoLiquidado();
-        uint256 fracoesDetidas = balanceOf(msg.sender, _duplicataId);
+        uint256 fracoesDetidas = balanceOf(msg.sender, duplicataId_);
         if (fracoesDetidas == 0) revert SemFracoesParaResgate();
 
         // Cálculo atômico da valor devido
         uint256 valorDevido = (fracoesDetidas * dup.valorNominalTotal) / dup.totalFracoes;
 
         // Effects (Queima os tokens do investidor ANTES da transferência)
-        _burn(msg.sender, _duplicataId, fracoesDetidas);
-        emit FracoesResgatadas(_duplicataId, msg.sender, valorDevido);
+        _burn(msg.sender, duplicataId_, fracoesDetidas);
+        emit FracoesResgatadas(duplicataId_, msg.sender, valorDevido);
 
         // Interactions (Transferência segura de Stablecoin ERC-20 para o investidor)
         TOKEN_LIQUIDADOR.safeTransfer(msg.sender, valorDevido);
@@ -248,7 +259,7 @@ contract ProtocoloAntecipacao is ERC1155, AccessControl, ReentrancyGuard, Pausab
     /**
      * @notice Sobrescrita exigida pelo ERC1155 e AccessControl
      */
-    function supportsInterface(bytes4 interfaceId) public view override(ERC1155, AccessControl) returns (bool) {
-        return super.supportsInterface(interfaceId);
+    function supportsInterface(bytes4 interfaceId_) public view override(ERC1155, AccessControl) returns (bool) {
+        return super.supportsInterface(interfaceId_);
     }
 }

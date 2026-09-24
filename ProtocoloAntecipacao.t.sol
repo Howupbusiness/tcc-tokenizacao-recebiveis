@@ -11,14 +11,9 @@ import {MaliciousStablecoin} from "./mocks/MaliciousStablecoin.sol";
 ///         Teste do Plano de Verificação) do TCC, executada contra o
 ///         contrato ProtocoloAntecipacao.sol tal como submetido.
 ///
-/// NOTA METODOLÓGICA: dois nomes na Tabela 7 estão grafados com "T" maiúsculo
-/// ("Test_ComprarFracoes_AutenticacaoVoucher" e
-/// "Test_MecanismoInterrupcao_Pausavel"). O Foundry só reconhece como teste
-/// funções cujo nome comece com "test" (minúsculo) ou "testFuzz". Mantida a
-/// grafia literal, essas duas funções NÃO seriam executadas por
-/// `forge test`. Por isso, abaixo elas foram implementadas com "t"
-/// minúsculo — ajuste equivalente necessário para que os 16 casos da
-/// Tabela 7 realmente rodem.
+/// NOTA METODOLÓGICA: O Foundry só reconhece como teste
+/// funções cujo nome comece com "test" (minúsculo) ou "testFuzz".
+
 contract ProtocoloAntecipacaoTest is Test {
     ProtocoloAntecipacao internal protocolo;
     MockStablecoin internal stablecoin;
